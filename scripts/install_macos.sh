@@ -79,8 +79,11 @@ state_file = sys.argv[3]
 project_refs = [item.strip() for item in sys.argv[4].split(",") if item.strip()]
 
 payload = {
-    "keychainService": "supabase-mcp-guard",
-    "keychainAccount": "primary",
+    "secretProvider": {
+        "type": "macos-keychain",
+        "service": "supabase-mcp-guard",
+        "account": "primary"
+    },
     "projectRef": None,
     "readOnly": False,
     "features": None,

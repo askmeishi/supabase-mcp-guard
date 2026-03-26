@@ -22,15 +22,6 @@ import {
 } from "@supabase/mcp-server-supabase";
 import { createSupabaseApiPlatform } from "@supabase/mcp-server-supabase/platform/api";
 
-const defaultConfigPath = resolve(homedir(), ".config", "supabase-mcp-guard", "config.json");
-const defaultLogPath = resolve(homedir(), ".local", "state", "supabase-mcp-guard", "audit.log");
-const defaultStatePath = resolve(
-  homedir(),
-  ".local",
-  "state",
-  "supabase-mcp-guard",
-  "write_lock.json",
-);
 const supportedFeatures = new Set([
   "account",
   "branching",
@@ -42,25 +33,65 @@ const supportedFeatures = new Set([
   "storage",
 ]);
 const defaultAlwaysBlockedTools = new Set(["create_project", "pause_project", "restore_project"]);
+const secretProviderTypes = new Set([
+  "macos-keychain",
+  "windows-credential-manager",
+  "powershell-secretmanagement",
+  "env",
+  "command",
+]);
 const writeSensitiveTools = new Set(
   Object.entries(supabaseMcpToolSchemas)
     .filter(([, schema]) => schema.annotations?.readOnlyHint === false)
     .map(([name]) => name),
 );
 
+function getDefaultPaths() {
+  if (process.platform === "win32") {
+    const appData = process.env.APPDATA || resolve(homedir(), "AppData", "Roaming");
+    const localAppData = process.env.LOCALAPPDATA || resolve(homedir(), "AppData", "Local");
+    return {
+      configPath: resolve(appData, "supabase-mcp-guard", "config.json"),
+      logPath: resolve(localAppData, "supabase-mcp-guard", "audit.log"),
+      statePath: resolve(localAppData, "supabase-mcp-guard", "write_lock.json"),
+    };
+  }
+
+  return {
+    configPath: resolve(homedir(), ".config", "supabase-mcp-guard", "config.json"),
+    logPath: resolve(homedir(), ".local", "state", "supabase-mcp-guard", "audit.log"),
+    statePath: resolve(homedir(), ".local", "state", "supabase-mcp-guard", "write_lock.json"),
+  };
+}
+
+const defaultPaths = getDefaultPaths();
+
 function exitWithError(message) {
   console.error(`[supabase-mcp-guard] ${message}`);
   process.exit(1);
 }
 
-function resolveHomePath(value) {
+function resolveTemplatePath(value) {
   if (typeof value !== "string" || !value.trim()) {
     return value;
   }
-  if (value.startsWith("~/")) {
-    return resolve(homedir(), value.slice(2));
+
+  let expanded = value;
+  if (expanded.startsWith("~/")) {
+    expanded = resolve(homedir(), expanded.slice(2));
   }
-  return resolve(value);
+
+  expanded = expanded.replace(/\$\{([^}]+)\}/g, (_, name) => process.env[name] ?? "");
+  expanded = expanded.replace(/%([^%]+)%/g, (_, name) => process.env[name] ?? "");
+
+  return resolve(expanded);
+}
+
+function normalizeStringList(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  return value.map((item) => String(item).trim()).filter(Boolean);
 }
 
 function parseCliArgs() {
@@ -76,12 +107,87 @@ function parseCliArgs() {
   });
 
   return {
-    configPath: values.config ? resolveHomePath(values.config) : defaultConfigPath,
+    configPath: values.config ? resolveTemplatePath(values.config) : defaultPaths.configPath,
     version: values.version ?? false,
     selfTest: values["self-test"] ?? false,
     minutes: values.minutes == null ? undefined : Number(values.minutes),
     client: values.client ? String(values.client).trim().toLowerCase() : null,
     command: positionals[0] ?? null,
+  };
+}
+
+function buildLegacySecretProvider(parsed) {
+  const keychainService = String(parsed.keychainService ?? "").trim();
+  const keychainAccount = String(parsed.keychainAccount ?? "").trim();
+  if (!keychainService || !keychainAccount) {
+    exitWithError("配置缺少 secretProvider，且旧字段 keychainService/keychainAccount 也不完整");
+  }
+
+  return {
+    type: "macos-keychain",
+    service: keychainService,
+    account: keychainAccount,
+  };
+}
+
+function normalizeSecretProvider(parsed) {
+  if (!parsed.secretProvider) {
+    return buildLegacySecretProvider(parsed);
+  }
+
+  if (typeof parsed.secretProvider !== "object" || parsed.secretProvider === null) {
+    exitWithError("配置字段 secretProvider 必须是对象");
+  }
+
+  const provider = parsed.secretProvider;
+  const type = String(provider.type ?? "").trim();
+  if (!secretProviderTypes.has(type)) {
+    exitWithError(`不支持的 secretProvider.type: ${type}`);
+  }
+
+  if (type === "macos-keychain") {
+    const service = String(provider.service ?? "").trim();
+    const account = String(provider.account ?? "").trim();
+    if (!service || !account) {
+      exitWithError("macos-keychain provider 需要 service 和 account");
+    }
+    return { type, service, account };
+  }
+
+  if (type === "windows-credential-manager") {
+    const target = String(provider.target ?? "").trim();
+    if (!target) {
+      exitWithError("windows-credential-manager provider 需要 target");
+    }
+    return { type, target };
+  }
+
+  if (type === "powershell-secretmanagement") {
+    const name = String(provider.name ?? "").trim();
+    const vault = provider.vault == null ? undefined : String(provider.vault).trim();
+    if (!name) {
+      exitWithError("powershell-secretmanagement provider 需要 name");
+    }
+    return { type, name, vault: vault || undefined };
+  }
+
+  if (type === "env") {
+    const name = String(provider.name ?? "").trim();
+    if (!name) {
+      exitWithError("env provider 需要 name");
+    }
+    return { type, name };
+  }
+
+  const command = String(provider.command ?? "").trim();
+  if (!command) {
+    exitWithError("command provider 需要 command");
+  }
+  return {
+    type,
+    command,
+    args: normalizeStringList(provider.args),
+    env: provider.env && typeof provider.env === "object" ? provider.env : undefined,
   };
 }
 
@@ -108,21 +214,7 @@ function loadConfig(configPath) {
     exitWithError("配置文件内容无效");
   }
 
-  const keychainService = String(parsed.keychainService ?? "").trim();
-  const keychainAccount = String(parsed.keychainAccount ?? "").trim();
-  if (!keychainService || !keychainAccount) {
-    exitWithError("配置缺少 keychainService 或 keychainAccount");
-  }
-
-  let features;
-  if (parsed.features == null) {
-    features = undefined;
-  } else if (Array.isArray(parsed.features)) {
-    features = parsed.features.map((item) => String(item).trim()).filter(Boolean);
-  } else {
-    exitWithError("配置字段 features 必须是数组或 null");
-  }
-
+  const features = parsed.features == null ? undefined : normalizeStringList(parsed.features);
   if (features) {
     for (const feature of features) {
       if (!supportedFeatures.has(feature)) {
@@ -133,19 +225,18 @@ function loadConfig(configPath) {
 
   const projectRef = parsed.projectRef == null ? undefined : String(parsed.projectRef).trim();
   const apiUrl = parsed.apiUrl == null ? undefined : String(parsed.apiUrl).trim();
-  const logFile = parsed.logFile == null ? defaultLogPath : resolveHomePath(String(parsed.logFile));
+  const logFile =
+    parsed.logFile == null ? defaultPaths.logPath : resolveTemplatePath(String(parsed.logFile));
   const stateFile =
-    parsed.stateFile == null ? defaultStatePath : resolveHomePath(String(parsed.stateFile));
+    parsed.stateFile == null ? defaultPaths.statePath : resolveTemplatePath(String(parsed.stateFile));
   const readOnly = Boolean(parsed.readOnly);
-  const allowedProjectIds = Array.isArray(parsed.allowedProjectIds)
-    ? parsed.allowedProjectIds.map((item) => String(item).trim()).filter(Boolean)
-    : [];
+  const allowedProjectIds = normalizeStringList(parsed.allowedProjectIds);
   const defaultUnlockMinutes =
     parsed.defaultUnlockMinutes == null ? 10 : Number(parsed.defaultUnlockMinutes);
   const alwaysBlockedTools = new Set(
-    Array.isArray(parsed.alwaysBlockedTools) && parsed.alwaysBlockedTools.length > 0
-      ? parsed.alwaysBlockedTools.map((item) => String(item).trim()).filter(Boolean)
-      : [...defaultAlwaysBlockedTools],
+    parsed.alwaysBlockedTools == null || normalizeStringList(parsed.alwaysBlockedTools).length === 0
+      ? [...defaultAlwaysBlockedTools]
+      : normalizeStringList(parsed.alwaysBlockedTools),
   );
 
   if (!Number.isFinite(defaultUnlockMinutes) || defaultUnlockMinutes <= 0) {
@@ -154,8 +245,7 @@ function loadConfig(configPath) {
 
   return {
     configPath,
-    keychainService,
-    keychainAccount,
+    secretProvider: normalizeSecretProvider(parsed),
     projectRef: projectRef || undefined,
     apiUrl: apiUrl || undefined,
     readOnly,
@@ -168,18 +258,18 @@ function loadConfig(configPath) {
   };
 }
 
-function ensureMacosKeychain() {
-  if (process.platform !== "darwin") {
-    exitWithError("当前版本仅支持 macOS Keychain");
+function ensurePlatform(expectedPlatform, providerName) {
+  if (process.platform !== expectedPlatform) {
+    exitWithError(`${providerName} 仅支持 ${expectedPlatform}`);
   }
 }
 
-function readTokenFromKeychain(service, account) {
-  ensureMacosKeychain();
+function readTokenViaMacosKeychain(provider) {
+  ensurePlatform("darwin", "macos-keychain");
   try {
     return execFileSync(
       "/usr/bin/security",
-      ["find-generic-password", "-w", "-s", service, "-a", account],
+      ["find-generic-password", "-w", "-s", provider.service, "-a", provider.account],
       {
         encoding: "utf8",
         stdio: ["ignore", "pipe", "pipe"],
@@ -187,15 +277,124 @@ function readTokenFromKeychain(service, account) {
     ).trim();
   } catch (error) {
     const stderr = String(error.stderr ?? "").trim();
-    const detail = stderr || error.message;
-    exitWithError(`从 macOS Keychain 读取 token 失败: ${detail}`);
+    exitWithError(`从 macOS Keychain 读取 token 失败: ${stderr || error.message}`);
   }
 }
 
-function appendAuditLog(logFile, payload) {
-  const logDir = dirname(logFile);
+function readTokenViaWindowsCredentialManager(provider) {
+  ensurePlatform("win32", "windows-credential-manager");
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "Import-Module CredentialManager -ErrorAction Stop",
+    `$entry = Get-StoredCredential -Target '${provider.target.replace(/'/g, "''")}'`,
+    "if ($null -eq $entry) { throw 'credential not found' }",
+    "if ($entry -is [pscredential]) {",
+    "  [Console]::Out.Write($entry.GetNetworkCredential().Password)",
+    "} elseif ($entry.Password) {",
+    "  [Console]::Out.Write($entry.Password)",
+    "} elseif ($entry.GetNetworkCredential) {",
+    "  [Console]::Out.Write($entry.GetNetworkCredential().Password)",
+    "} else {",
+    "  throw 'password not accessible'",
+    "}",
+  ].join("; ");
+
   try {
-    mkdirSync(logDir, { recursive: true, mode: 0o700 });
+    return execFileSync(
+      "powershell.exe",
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    ).trim();
+  } catch (error) {
+    const stderr = String(error.stderr ?? "").trim();
+    exitWithError(
+      `从 Windows Credential Manager 读取 token 失败: ${stderr || error.message}`,
+    );
+  }
+}
+
+function readTokenViaPowerShellSecretManagement(provider) {
+  const shell = process.platform === "win32" ? "powershell.exe" : "pwsh";
+  const vaultExpr = provider.vault
+    ? ` -Vault '${provider.vault.replace(/'/g, "''")}'`
+    : "";
+  const script = [
+    "$ErrorActionPreference = 'Stop'",
+    "Import-Module Microsoft.PowerShell.SecretManagement -ErrorAction Stop",
+    `[Console]::Out.Write((Get-Secret -Name '${provider.name.replace(/'/g, "''")}'${vaultExpr} -AsPlainText))`,
+  ].join("; ");
+
+  try {
+    return execFileSync(
+      shell,
+      ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script],
+      {
+        encoding: "utf8",
+        stdio: ["ignore", "pipe", "pipe"],
+      },
+    ).trim();
+  } catch (error) {
+    const stderr = String(error.stderr ?? "").trim();
+    exitWithError(
+      `通过 PowerShell SecretManagement 读取 token 失败: ${stderr || error.message}`,
+    );
+  }
+}
+
+function readTokenViaEnv(provider) {
+  const value = process.env[provider.name];
+  if (!value) {
+    exitWithError(`环境变量 ${provider.name} 未设置或为空`);
+  }
+  return String(value).trim();
+}
+
+function readTokenViaCommand(provider) {
+  const env = { ...process.env };
+  if (provider.env) {
+    for (const [key, value] of Object.entries(provider.env)) {
+      env[key] = String(value);
+    }
+  }
+
+  try {
+    return execFileSync(provider.command, provider.args ?? [], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+      env,
+    }).trim();
+  } catch (error) {
+    const stderr = String(error.stderr ?? "").trim();
+    exitWithError(`通过命令读取 token 失败: ${stderr || error.message}`);
+  }
+}
+
+function readTokenFromProvider(provider) {
+  if (provider.type === "macos-keychain") {
+    return readTokenViaMacosKeychain(provider);
+  }
+  if (provider.type === "windows-credential-manager") {
+    return readTokenViaWindowsCredentialManager(provider);
+  }
+  if (provider.type === "powershell-secretmanagement") {
+    return readTokenViaPowerShellSecretManagement(provider);
+  }
+  if (provider.type === "env") {
+    return readTokenViaEnv(provider);
+  }
+  if (provider.type === "command") {
+    return readTokenViaCommand(provider);
+  }
+
+  exitWithError(`未知 secret provider: ${provider.type}`);
+}
+
+function appendAuditLog(logFile, payload) {
+  try {
+    mkdirSync(dirname(logFile), { recursive: true, mode: 0o700 });
     appendFileSync(logFile, `${JSON.stringify(payload)}\n`, {
       encoding: "utf8",
       mode: 0o600,
@@ -313,10 +512,9 @@ function writeUnlockState(config, minutes) {
 }
 
 function clearUnlockState(config) {
-  if (!existsSync(config.stateFile)) {
-    return;
+  if (existsSync(config.stateFile)) {
+    unlinkSync(config.stateFile);
   }
-  unlinkSync(config.stateFile);
 }
 
 function buildJsonRpcError(id, message) {
@@ -429,9 +627,9 @@ class GuardedStdioTransport {
 }
 
 async function buildServer(config) {
-  const accessToken = readTokenFromKeychain(config.keychainService, config.keychainAccount);
+  const accessToken = readTokenFromProvider(config.secretProvider);
   if (!accessToken) {
-    exitWithError("Keychain 中的 token 为空");
+    exitWithError("读取到的 token 为空");
   }
 
   const platform = createSupabaseApiPlatform({
@@ -458,6 +656,32 @@ function printClientSnippet(client) {
     return;
   }
 
+  if (client === "cursor" || client === "claude-code") {
+    printJson({
+      mcpServers: {
+        supabase: {
+          type: "stdio",
+          command: "supabase-mcp-guard",
+          args: [],
+        },
+      },
+    });
+    return;
+  }
+
+  if (client === "vscode" || client === "vs-code" || client === "visual-studio-code") {
+    printJson({
+      servers: {
+        supabase: {
+          type: "stdio",
+          command: "supabase-mcp-guard",
+          args: [],
+        },
+      },
+    });
+    return;
+  }
+
   exitWithError(`不支持的 client: ${client}`);
 }
 
@@ -478,6 +702,7 @@ function handleControlCommand(args, config) {
       allowed_project_ids: config.allowedProjectIds,
       default_unlock_minutes: config.defaultUnlockMinutes,
       always_blocked_tools: [...config.alwaysBlockedTools],
+      secret_provider_type: config.secretProvider.type,
     });
     return true;
   }
@@ -520,7 +745,8 @@ async function main() {
       alwaysBlockedTools: defaultAlwaysBlockedTools,
       allowedProjectIds: [],
       defaultUnlockMinutes: 10,
-      stateFile: defaultStatePath,
+      secretProvider: { type: "none" },
+      stateFile: defaultPaths.statePath,
     });
     return;
   }
@@ -529,6 +755,7 @@ async function main() {
   if (handleControlCommand(args, config)) {
     return;
   }
+
   const server = await buildServer(config);
 
   if (args.selfTest) {
@@ -543,6 +770,7 @@ async function main() {
       write_lock_state: readUnlockState(config),
       default_unlock_minutes: config.defaultUnlockMinutes,
       always_blocked_tools: [...config.alwaysBlockedTools],
+      secret_provider_type: config.secretProvider.type,
     });
     await server.close();
     return;

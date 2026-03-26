@@ -5,16 +5,16 @@
 
 Local policy wrapper for Supabase MCP.
 
-It keeps your Supabase access token out of MCP config files and command-line arguments, stores the token in macOS Keychain, and adds local safety controls before requests reach the official `@supabase/mcp-server-supabase`.
+It keeps your Supabase access token out of MCP config files and command-line arguments, adds local policy checks before requests hit the official `@supabase/mcp-server-supabase`, and makes production write access an explicit action instead of a default capability.
 
 This project does not replace Supabase MCP. It sits in front of it.
 
 ## Why this exists
 
-Supabase MCP is powerful, but many AI coding clients treat MCP tools as highly trusted local capabilities. In practice that creates a few common problems:
+Supabase MCP is powerful, but AI coding clients usually treat MCP servers as highly trusted local tools. In practice that creates a few common problems:
 
-- Supabase access tokens often end up in plain text client config.
-- Tokens are frequently passed through command-line arguments.
+- Supabase access tokens end up in plain text config files.
+- Tokens are passed through command-line arguments.
 - Production and development projects share one broad access token.
 - Write-capable tools are available by default.
 - AI agents can accidentally run migrations or write SQL against production.
@@ -23,7 +23,7 @@ Supabase MCP is powerful, but many AI coding clients treat MCP tools as highly t
 
 ## What it does
 
-- Reads the Supabase access token from macOS Keychain instead of config files.
+- Reads the Supabase access token from a configurable secret provider.
 - Keeps the token out of command-line arguments.
 - Supports project allowlists.
 - Blocks selected high-risk tools permanently.
@@ -32,67 +32,159 @@ Supabase MCP is powerful, but many AI coding clients treat MCP tools as highly t
 - Treats `execute_sql` specially: read-only SQL can pass while write/DDL SQL is blocked unless unlocked.
 - Writes a local audit log for tool calls and blocked operations.
 
-## Scope
+## Current platform support
 
-Current version scope:
+- macOS
+  - `macos-keychain`
+  - `env`
+  - `command`
+  - `powershell-secretmanagement` if you already use PowerShell on macOS
+- Windows
+  - `powershell-secretmanagement`
+  - `windows-credential-manager`
+  - `env`
+  - `command`
+- Linux
+  - `env`
+  - `command`
+  - `powershell-secretmanagement` if PowerShell is installed
 
-- Supported OS: macOS
-- Secret backend: macOS Keychain
-- Transport: stdio MCP
-- Target upstream server: `@supabase/mcp-server-supabase`
+The first-class installers included in this repo are:
 
-This is intentionally narrow for the first public version.
+- macOS: [scripts/install_macos.sh](./scripts/install_macos.sh)
+- Windows: [scripts/install_windows.ps1](./scripts/install_windows.ps1)
+
+## Supported MCP clients
+
+This project uses stdio transport, so it can be wired into many MCP-capable clients.
+
+Documented in this repo:
+
+- Codex
+- Claude Code
+- Cursor
+- VS Code
 
 ## Install
 
-### 1. Clone the repo
+### Clone the repo
 
 ```bash
 git clone https://github.com/askmeishi/supabase-mcp-guard.git
 cd supabase-mcp-guard
 ```
 
-### 2. Install dependencies
+### Install dependencies
 
 ```bash
 npm install
 ```
 
-### 3. Run the macOS installer
+### macOS installer
 
 ```bash
 ./scripts/install_macos.sh --client=codex
 ```
 
-The installer will:
+What it does:
 
-- ask for a new Supabase access token
-- store it in macOS Keychain
-- write local config to `~/.config/supabase-mcp-guard/config.json`
-- install the wrapper to `/usr/local/bin/supabase-mcp-guard`
-- optionally patch `~/.codex/config.toml`
+- prompts for a new Supabase access token
+- stores it in macOS Keychain
+- writes config to `~/.config/supabase-mcp-guard/config.json`
+- installs the wrapper to `/usr/local/bin/supabase-mcp-guard`
+- optionally patches `~/.codex/config.toml`
 
-If you do not want automatic Codex config changes:
+### Windows installer
 
-```bash
-./scripts/install_macos.sh
+Open PowerShell and run:
+
+```powershell
+Set-ExecutionPolicy -Scope Process Bypass
+.\scripts\install_windows.ps1
 ```
 
-## Codex config example
+What it does:
 
-You can print the config snippet at any time:
+- prompts for a new Supabase access token
+- installs PowerShell `SecretManagement` and `SecretStore` modules if missing
+- stores the token in `SecretStore`
+- writes config to `%APPDATA%\supabase-mcp-guard\config.json`
+- installs the wrapper under `%LOCALAPPDATA%\Programs\supabase-mcp-guard`
+- adds the local wrapper directory to the user `PATH`
 
-```bash
-supabase-mcp-guard print-snippet --client codex
+## Secret providers
+
+### `macos-keychain`
+
+Use macOS Keychain:
+
+```json
+{
+  "secretProvider": {
+    "type": "macos-keychain",
+    "service": "supabase-mcp-guard",
+    "account": "primary"
+  }
+}
 ```
 
-Current output:
+### `powershell-secretmanagement`
 
-```toml
-[mcp_servers.supabase]
-command = "supabase-mcp-guard"
-startup_timeout_sec = 30
+Use PowerShell SecretManagement and a named secret:
+
+```json
+{
+  "secretProvider": {
+    "type": "powershell-secretmanagement",
+    "name": "supabase-mcp-guard",
+    "vault": "SecretStore"
+  }
+}
 ```
+
+### `windows-credential-manager`
+
+Use a Windows Credential Manager target:
+
+```json
+{
+  "secretProvider": {
+    "type": "windows-credential-manager",
+    "target": "supabase-mcp-guard"
+  }
+}
+```
+
+This provider expects a PowerShell environment where the `CredentialManager` module and `Get-StoredCredential` are available.
+
+### `env`
+
+Read the token from an environment variable:
+
+```json
+{
+  "secretProvider": {
+    "type": "env",
+    "name": "SUPABASE_ACCESS_TOKEN"
+  }
+}
+```
+
+### `command`
+
+Read the token from an arbitrary local command:
+
+```json
+{
+  "secretProvider": {
+    "type": "command",
+    "command": "op",
+    "args": ["read", "op://vault/item/token"]
+  }
+}
+```
+
+This is the most flexible option for unsupported platforms or custom secret stores.
 
 ## Config
 
@@ -102,8 +194,11 @@ Typical config:
 
 ```json
 {
-  "keychainService": "supabase-mcp-guard",
-  "keychainAccount": "primary",
+  "secretProvider": {
+    "type": "macos-keychain",
+    "service": "supabase-mcp-guard",
+    "account": "primary"
+  },
   "projectRef": null,
   "readOnly": false,
   "features": null,
@@ -122,6 +217,73 @@ Notes:
 - `projectRef`: optional upstream fixed project binding.
 - `readOnly`: if true, all write-sensitive upstream tools are blocked even during unlock windows.
 - `alwaysBlockedTools`: tools that are always denied.
+
+## Client snippets
+
+The CLI can print snippets directly:
+
+```bash
+supabase-mcp-guard print-snippet --client codex
+supabase-mcp-guard print-snippet --client claude-code
+supabase-mcp-guard print-snippet --client cursor
+supabase-mcp-guard print-snippet --client vscode
+```
+
+### Codex
+
+```toml
+[mcp_servers.supabase]
+command = "supabase-mcp-guard"
+startup_timeout_sec = 30
+```
+
+### Claude Code
+
+Use a stdio MCP server entry in your Claude Code MCP JSON:
+
+```json
+{
+  "mcpServers": {
+    "supabase": {
+      "type": "stdio",
+      "command": "supabase-mcp-guard",
+      "args": []
+    }
+  }
+}
+```
+
+### Cursor
+
+Use a stdio MCP server entry in your Cursor MCP JSON:
+
+```json
+{
+  "mcpServers": {
+    "supabase": {
+      "type": "stdio",
+      "command": "supabase-mcp-guard",
+      "args": []
+    }
+  }
+}
+```
+
+### VS Code
+
+Use a stdio MCP server entry in your VS Code MCP config:
+
+```json
+{
+  "servers": {
+    "supabase": {
+      "type": "stdio",
+      "command": "supabase-mcp-guard",
+      "args": []
+    }
+  }
+}
+```
 
 ## Usage
 
@@ -178,11 +340,12 @@ This helps reduce accidental misuse, but it is not a substitute for correct data
 
 ## Audit log
 
-The wrapper writes a local audit log to:
+The wrapper writes a local audit log to the configured `logFile`.
 
-```text
-~/.local/state/supabase-mcp-guard/audit.log
-```
+Examples:
+
+- macOS/Linux default: `~/.local/state/supabase-mcp-guard/audit.log`
+- Windows default: `%LOCALAPPDATA%\supabase-mcp-guard\audit.log`
 
 Blocked requests and completed upstream tool calls are both recorded.
 
@@ -202,11 +365,21 @@ It does not protect against:
 
 ## Roadmap
 
-- Linux secret backend support
-- Windows credential backend support
+- Linux first-class installer
+- client-specific helper commands beyond config snippets
 - finer-grained SQL policy rules
 - environment-specific policies
 - notification hooks for blocked high-risk actions
+
+## References
+
+For the latest client-specific MCP setup details, check the official client docs:
+
+- [Cursor MCP docs](https://docs.cursor.com/advanced/model-context-protocol)
+- [Claude Code MCP docs](https://docs.anthropic.com/en/docs/claude-code/mcp)
+- [VS Code MCP docs](https://code.visualstudio.com/docs/copilot/chat/mcp-servers)
+
+The JSON snippets above are intended for stdio-based MCP clients and may need minor path adjustments depending on how you install the wrapper.
 
 ## License
 

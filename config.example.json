@@ -1,6 +1,9 @@
 {
-  "keychainService": "supabase-mcp-guard",
-  "keychainAccount": "primary",
+  "secretProvider": {
+    "type": "macos-keychain",
+    "service": "supabase-mcp-guard",
+    "account": "primary"
+  },
   "projectRef": null,
   "readOnly": false,
   "features": null,
