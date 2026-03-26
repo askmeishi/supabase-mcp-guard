@@ -1,5 +1,8 @@
 # supabase-mcp-guard
 
+[![CI](https://github.com/askmeishi/supabase-mcp-guard/actions/workflows/ci.yml/badge.svg)](https://github.com/askmeishi/supabase-mcp-guard/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
 Local policy wrapper for Supabase MCP.
 
 It keeps your Supabase access token out of MCP config files and command-line arguments, stores the token in macOS Keychain, and adds local safety controls before requests reach the official `@supabase/mcp-server-supabase`.
