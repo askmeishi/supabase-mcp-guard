@@ -25,7 +25,9 @@ jobs:
         run: npm ci
 
       - name: Verify package
-        run: npm run check
+        run: |
+          npm run check
+          npm test
 
       - name: Pack
         run: npm pack

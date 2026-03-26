@@ -84,7 +84,7 @@ New-Item -ItemType Directory -Force -Path $tmpInstallDir | Out-Null
 
 try {
     Copy-Item (Join-Path $repoRoot "package.json") (Join-Path $tmpInstallDir "package.json")
-    Copy-Item (Join-Path $repoRoot "src\cli.mjs") (Join-Path $tmpInstallDir "cli.mjs")
+    Copy-Item (Join-Path $repoRoot "src") (Join-Path $tmpInstallDir "src") -Recurse -Force
     if (Test-Path (Join-Path $repoRoot "package-lock.json")) {
         Copy-Item (Join-Path $repoRoot "package-lock.json") (Join-Path $tmpInstallDir "package-lock.json")
         npm ci --omit=dev --ignore-scripts --no-audit --no-fund --prefix $tmpInstallDir | Out-Null
@@ -97,19 +97,25 @@ try {
     if (Test-Path (Join-Path $installRoot "node_modules")) {
         Remove-Item -Recurse -Force (Join-Path $installRoot "node_modules")
     }
+    if (Test-Path (Join-Path $installRoot "src")) {
+        Remove-Item -Recurse -Force (Join-Path $installRoot "src")
+    }
+    if (Test-Path (Join-Path $installRoot "cli.mjs")) {
+        Remove-Item -Force (Join-Path $installRoot "cli.mjs")
+    }
 
     Copy-Item (Join-Path $tmpInstallDir "package.json") (Join-Path $installRoot "package.json") -Force
     if (Test-Path (Join-Path $tmpInstallDir "package-lock.json")) {
         Copy-Item (Join-Path $tmpInstallDir "package-lock.json") (Join-Path $installRoot "package-lock.json") -Force
     }
-    Copy-Item (Join-Path $tmpInstallDir "cli.mjs") (Join-Path $installRoot "cli.mjs") -Force
+    Copy-Item (Join-Path $tmpInstallDir "src") (Join-Path $installRoot "src") -Recurse -Force
     Copy-Item (Join-Path $tmpInstallDir "node_modules") (Join-Path $installRoot "node_modules") -Recurse -Force
 
     $nodeBin = (Get-Command node).Source
     @"
 @echo off
 setlocal
-"$nodeBin" "$installRoot\cli.mjs" %*
+"$nodeBin" "$installRoot\src\cli.mjs" %*
 "@ | Set-Content -Path $installCmd -Encoding ASCII
 
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")

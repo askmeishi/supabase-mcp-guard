@@ -109,7 +109,7 @@ cleanup() {
 trap cleanup EXIT
 
 cp "${REPO_ROOT}/package.json" "${TMP_INSTALL_DIR}/package.json"
-cp "${REPO_ROOT}/src/cli.mjs" "${TMP_INSTALL_DIR}/cli.mjs"
+cp -R "${REPO_ROOT}/src" "${TMP_INSTALL_DIR}/src"
 
 if [[ -f "${REPO_ROOT}/package-lock.json" ]]; then
   cp "${REPO_ROOT}/package-lock.json" "${TMP_INSTALL_DIR}/package-lock.json"
@@ -131,7 +131,7 @@ install_root = sys.argv[3]
 target.write_text(f"""#!/usr/bin/env bash
 set -euo pipefail
 NODE_BIN="{node_bin}"
-SCRIPT_PATH="{install_root}/cli.mjs"
+SCRIPT_PATH="{install_root}/src/cli.mjs"
 if [[ ! -x "$NODE_BIN" ]]; then
   NODE_BIN="$(command -v node || true)"
 fi
@@ -146,11 +146,13 @@ chmod 755 "${TMP_INSTALL_DIR}/supabase-mcp-guard"
 
 sudo mkdir -p "${INSTALL_ROOT}"
 sudo rm -rf "${INSTALL_ROOT}/node_modules"
+sudo rm -rf "${INSTALL_ROOT}/src"
+sudo rm -f "${INSTALL_ROOT}/cli.mjs"
 sudo cp "${TMP_INSTALL_DIR}/package.json" "${INSTALL_ROOT}/package.json"
 if [[ -f "${TMP_INSTALL_DIR}/package-lock.json" ]]; then
   sudo cp "${TMP_INSTALL_DIR}/package-lock.json" "${INSTALL_ROOT}/package-lock.json"
 fi
-sudo cp "${TMP_INSTALL_DIR}/cli.mjs" "${INSTALL_ROOT}/cli.mjs"
+sudo cp -R "${TMP_INSTALL_DIR}/src" "${INSTALL_ROOT}/src"
 sudo cp -R "${TMP_INSTALL_DIR}/node_modules" "${INSTALL_ROOT}/node_modules"
 sudo chown -R root:wheel "${INSTALL_ROOT}"
 sudo chmod -R go-w "${INSTALL_ROOT}"

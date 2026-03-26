@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
 import { t, currentLocale } from "./i18n.mjs";
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
@@ -447,7 +448,64 @@ function createAuditLogger(config) {
   };
 }
 
-function classifySql(query) {
+function findTopLevelWithTarget(normalized) {
+  let index = normalized.search(/\bwith\b/);
+  if (index === -1) {
+    return null;
+  }
+
+  index += 4;
+  while (index < normalized.length && /\s/.test(normalized[index])) {
+    index += 1;
+  }
+
+  if (normalized.startsWith("recursive", index)) {
+    index += "recursive".length;
+  }
+
+  let depth = 0;
+  let quote = null;
+  for (; index < normalized.length; index += 1) {
+    const char = normalized[index];
+    const next = normalized[index + 1];
+
+    if (quote) {
+      if (char === quote) {
+        if (quote === "'" && next === "'") {
+          index += 1;
+          continue;
+        }
+        quote = null;
+      }
+      continue;
+    }
+
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+
+    if (char === "(") {
+      depth += 1;
+      continue;
+    }
+    if (char === ")") {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+
+    if (depth === 0 && /[a-z]/.test(char)) {
+      const match = normalized.slice(index).match(/^(select|insert|update|delete|merge|values|show|explain)\b/);
+      if (match) {
+        return match[1];
+      }
+    }
+  }
+
+  return null;
+}
+
+export function classifySql(query) {
   if (typeof query !== "string") {
     return { type: "unknown", reason: t("queryNotString") };
   }
@@ -472,6 +530,10 @@ function classifySql(query) {
   }
 
   if (/^\s*with\b/.test(normalized)) {
+    const target = findTopLevelWithTarget(normalized);
+    if (target && /^(select|explain|show|values)$/.test(target)) {
+      return { type: "read", reason: t("sqlReadOnly") };
+    }
     return { type: "unknown", reason: t("sqlWithUnknown") };
   }
 
@@ -749,6 +811,25 @@ async function main() {
     return;
   }
 
+  if (args.selfTest && !existsSync(args.configPath)) {
+    printJson({
+      ok: true,
+      config_path: args.configPath,
+      config_exists: false,
+      project_ref: null,
+      read_only: null,
+      features: null,
+      version: supabaseMcpVersion,
+      allowed_project_ids: [],
+      write_lock_state: { unlocked: false, until: null },
+      default_unlock_minutes: 10,
+      always_blocked_tools: [...defaultAlwaysBlockedTools],
+      secret_provider_type: null,
+      locale: currentLocale(),
+    });
+    return;
+  }
+
   const config = loadConfig(args.configPath);
   if (handleControlCommand(args, config)) {
     return;
@@ -760,6 +841,7 @@ async function main() {
     printJson({
       ok: true,
       config_path: config.configPath,
+      config_exists: true,
       project_ref: config.projectRef ?? null,
       read_only: config.readOnly,
       features: config.features ?? null,
@@ -779,6 +861,9 @@ async function main() {
   await server.connect(transport);
 }
 
-main().catch((error) => {
-  exitWithError(error instanceof Error ? error.message : String(error));
-});
+const entryPath = process.argv[1] ? resolve(process.argv[1]) : null;
+if (entryPath && entryPath === fileURLToPath(import.meta.url)) {
+  main().catch((error) => {
+    exitWithError(error instanceof Error ? error.message : String(error));
+  });
+}

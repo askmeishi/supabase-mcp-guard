@@ -94,6 +94,8 @@ If you install from npm globally, you can run the wrapper directly without cloni
 supabase-mcp-guard --self-test
 ```
 
+This checks that the binary starts correctly and shows whether a config file is already present.
+
 ### macOS installer
 
 ```bash

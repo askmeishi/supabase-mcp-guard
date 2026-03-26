@@ -31,5 +31,8 @@ jobs:
       - name: Syntax check
         run: npm run check
 
+      - name: Tests
+        run: npm test
+
       - name: Package dry run
         run: npm pack --dry-run

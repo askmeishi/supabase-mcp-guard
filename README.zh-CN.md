@@ -94,6 +94,8 @@ npm install -g supabase-mcp-guard
 supabase-mcp-guard --self-test
 ```
 
+这条命令会检查二进制是否能正常启动，并显示当前是否已经存在配置文件。
+
 ### macOS
 
 ```bash
