@@ -13,6 +13,7 @@ import {
 } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { homedir } from "node:os";
+import { t, currentLocale } from "./i18n.mjs";
 
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
@@ -120,7 +121,7 @@ function buildLegacySecretProvider(parsed) {
   const keychainService = String(parsed.keychainService ?? "").trim();
   const keychainAccount = String(parsed.keychainAccount ?? "").trim();
   if (!keychainService || !keychainAccount) {
-    exitWithError("配置缺少 secretProvider，且旧字段 keychainService/keychainAccount 也不完整");
+    exitWithError(t("legacySecretMissing"));
   }
 
   return {
@@ -136,20 +137,20 @@ function normalizeSecretProvider(parsed) {
   }
 
   if (typeof parsed.secretProvider !== "object" || parsed.secretProvider === null) {
-    exitWithError("配置字段 secretProvider 必须是对象");
+    exitWithError(t("secretProviderMustBeObject"));
   }
 
   const provider = parsed.secretProvider;
   const type = String(provider.type ?? "").trim();
   if (!secretProviderTypes.has(type)) {
-    exitWithError(`不支持的 secretProvider.type: ${type}`);
+    exitWithError(t("secretProviderUnsupported", { type }));
   }
 
   if (type === "macos-keychain") {
     const service = String(provider.service ?? "").trim();
     const account = String(provider.account ?? "").trim();
     if (!service || !account) {
-      exitWithError("macos-keychain provider 需要 service 和 account");
+      exitWithError(t("secretProviderMacosMissing"));
     }
     return { type, service, account };
   }
@@ -157,7 +158,7 @@ function normalizeSecretProvider(parsed) {
   if (type === "windows-credential-manager") {
     const target = String(provider.target ?? "").trim();
     if (!target) {
-      exitWithError("windows-credential-manager provider 需要 target");
+      exitWithError(t("secretProviderWindowsMissing"));
     }
     return { type, target };
   }
@@ -166,7 +167,7 @@ function normalizeSecretProvider(parsed) {
     const name = String(provider.name ?? "").trim();
     const vault = provider.vault == null ? undefined : String(provider.vault).trim();
     if (!name) {
-      exitWithError("powershell-secretmanagement provider 需要 name");
+      exitWithError(t("secretProviderPsMissing"));
     }
     return { type, name, vault: vault || undefined };
   }
@@ -174,14 +175,14 @@ function normalizeSecretProvider(parsed) {
   if (type === "env") {
     const name = String(provider.name ?? "").trim();
     if (!name) {
-      exitWithError("env provider 需要 name");
+      exitWithError(t("secretProviderEnvMissing"));
     }
     return { type, name };
   }
 
   const command = String(provider.command ?? "").trim();
   if (!command) {
-    exitWithError("command provider 需要 command");
+    exitWithError(t("secretProviderCommandMissing"));
   }
   return {
     type,
@@ -193,32 +194,32 @@ function normalizeSecretProvider(parsed) {
 
 function loadConfig(configPath) {
   if (!existsSync(configPath)) {
-    exitWithError(`配置文件不存在: ${configPath}`);
+    exitWithError(t("fileNotFound", { path: configPath }));
   }
 
   let raw;
   try {
     raw = readFileSync(configPath, "utf8");
   } catch (error) {
-    exitWithError(`读取配置失败: ${error.message}`);
+    exitWithError(t("configReadFailed", { message: error.message }));
   }
 
   let parsed;
   try {
     parsed = JSON.parse(raw);
   } catch (error) {
-    exitWithError(`配置文件不是合法 JSON: ${error.message}`);
+    exitWithError(t("configJsonInvalid", { message: error.message }));
   }
 
   if (!parsed || typeof parsed !== "object") {
-    exitWithError("配置文件内容无效");
+    exitWithError(t("configInvalid"));
   }
 
   const features = parsed.features == null ? undefined : normalizeStringList(parsed.features);
   if (features) {
     for (const feature of features) {
       if (!supportedFeatures.has(feature)) {
-        exitWithError(`不支持的 features 值: ${feature}`);
+        exitWithError(t("featureUnsupported", { feature }));
       }
     }
   }
@@ -240,7 +241,7 @@ function loadConfig(configPath) {
   );
 
   if (!Number.isFinite(defaultUnlockMinutes) || defaultUnlockMinutes <= 0) {
-    exitWithError("配置字段 defaultUnlockMinutes 必须是正数");
+    exitWithError(t("unlockMinutesInvalid"));
   }
 
   return {
@@ -260,7 +261,7 @@ function loadConfig(configPath) {
 
 function ensurePlatform(expectedPlatform, providerName) {
   if (process.platform !== expectedPlatform) {
-    exitWithError(`${providerName} 仅支持 ${expectedPlatform}`);
+    exitWithError(t("platformOnly", { provider: providerName, platform: expectedPlatform }));
   }
 }
 
@@ -277,7 +278,7 @@ function readTokenViaMacosKeychain(provider) {
     ).trim();
   } catch (error) {
     const stderr = String(error.stderr ?? "").trim();
-    exitWithError(`从 macOS Keychain 读取 token 失败: ${stderr || error.message}`);
+    exitWithError(t("macosReadFailed", { message: stderr || error.message }));
   }
 }
 
@@ -310,9 +311,7 @@ function readTokenViaWindowsCredentialManager(provider) {
     ).trim();
   } catch (error) {
     const stderr = String(error.stderr ?? "").trim();
-    exitWithError(
-      `从 Windows Credential Manager 读取 token 失败: ${stderr || error.message}`,
-    );
+    exitWithError(t("windowsReadFailed", { message: stderr || error.message }));
   }
 }
 
@@ -338,16 +337,14 @@ function readTokenViaPowerShellSecretManagement(provider) {
     ).trim();
   } catch (error) {
     const stderr = String(error.stderr ?? "").trim();
-    exitWithError(
-      `通过 PowerShell SecretManagement 读取 token 失败: ${stderr || error.message}`,
-    );
+    exitWithError(t("powershellSecretFailed", { message: stderr || error.message }));
   }
 }
 
 function readTokenViaEnv(provider) {
   const value = process.env[provider.name];
   if (!value) {
-    exitWithError(`环境变量 ${provider.name} 未设置或为空`);
+    exitWithError(t("envMissing", { name: provider.name }));
   }
   return String(value).trim();
 }
@@ -368,7 +365,7 @@ function readTokenViaCommand(provider) {
     }).trim();
   } catch (error) {
     const stderr = String(error.stderr ?? "").trim();
-    exitWithError(`通过命令读取 token 失败: ${stderr || error.message}`);
+    exitWithError(t("commandReadFailed", { message: stderr || error.message }));
   }
 }
 
@@ -389,7 +386,7 @@ function readTokenFromProvider(provider) {
     return readTokenViaCommand(provider);
   }
 
-  exitWithError(`未知 secret provider: ${provider.type}`);
+  exitWithError(t("unknownSecretProvider", { type: provider.type }));
 }
 
 function appendAuditLog(logFile, payload) {
@@ -401,7 +398,7 @@ function appendAuditLog(logFile, payload) {
     });
     chmodSync(logFile, 0o600);
   } catch (error) {
-    console.error(`[supabase-mcp-guard] 写入审计日志失败: ${error.message}`);
+    console.error(`[supabase-mcp-guard] ${t("auditWriteFailed", { message: error.message })}`);
   }
 }
 
@@ -452,7 +449,7 @@ function createAuditLogger(config) {
 
 function classifySql(query) {
   if (typeof query !== "string") {
-    return { type: "unknown", reason: "query 不是字符串" };
+    return { type: "unknown", reason: t("queryNotString") };
   }
 
   const stripped = query
@@ -460,25 +457,25 @@ function classifySql(query) {
     .replace(/--.*$/gm, " ")
     .trim();
   if (!stripped) {
-    return { type: "unknown", reason: "query 为空" };
+    return { type: "unknown", reason: t("queryEmpty") };
   }
 
   const normalized = stripped.toLowerCase();
   const writeKeyword =
     /\b(insert|update|delete|alter|drop|truncate|create|grant|revoke|merge|call|do|copy|vacuum|reindex|comment|refresh|analyze)\b/;
   if (writeKeyword.test(normalized)) {
-    return { type: "write", reason: "检测到写或 DDL 关键字" };
+    return { type: "write", reason: t("sqlWriteDetected") };
   }
 
   if (/^\s*(select|explain|show|values)\b/.test(normalized)) {
-    return { type: "read", reason: "只读语句" };
+    return { type: "read", reason: t("sqlReadOnly") };
   }
 
   if (/^\s*with\b/.test(normalized)) {
-    return { type: "unknown", reason: "WITH 语句无法安全判定" };
+    return { type: "unknown", reason: t("sqlWithUnknown") };
   }
 
-  return { type: "unknown", reason: "无法判定 SQL 类型" };
+  return { type: "unknown", reason: t("sqlUnknown") };
 }
 
 function readUnlockState(config) {
@@ -544,7 +541,7 @@ function guardToolCall(config, message) {
   }
 
   if (config.alwaysBlockedTools.has(toolName)) {
-    return `工具 ${toolName} 已被本地安全策略永久禁用`;
+    return t("toolPermanentlyBlocked", { tool: toolName });
   }
 
   const projectId =
@@ -554,12 +551,12 @@ function guardToolCall(config, message) {
     config.allowedProjectIds.length > 0 &&
     !config.allowedProjectIds.includes(projectId)
   ) {
-    return `project_id=${projectId} 不在本地白名单中`;
+    return t("projectBlocked", { projectId });
   }
 
   if (toolName === "execute_sql") {
     if (config.readOnly) {
-      return "execute_sql 被 readOnly 配置阻止";
+      return t("executeSqlReadOnlyBlocked");
     }
     const sqlState = classifySql(argumentsObject.query);
     if (sqlState.type === "read") {
@@ -567,7 +564,7 @@ function guardToolCall(config, message) {
     }
     const unlockState = readUnlockState(config);
     if (!unlockState.unlocked) {
-      return `execute_sql 当前仅允许只读 SQL；如需执行写 SQL，请先运行 supabase-mcp-guard unlock --minutes ${config.defaultUnlockMinutes}`;
+      return t("executeSqlUnlockRequired", { minutes: config.defaultUnlockMinutes });
     }
     return null;
   }
@@ -577,7 +574,7 @@ function guardToolCall(config, message) {
   }
 
   if (config.readOnly) {
-    return `工具 ${toolName} 被 readOnly 配置阻止`;
+    return t("toolReadOnlyBlocked", { tool: toolName });
   }
 
   const unlockState = readUnlockState(config);
@@ -585,7 +582,7 @@ function guardToolCall(config, message) {
     return null;
   }
 
-  return `工具 ${toolName} 当前处于写保护状态；如需执行，请先运行 supabase-mcp-guard unlock --minutes ${config.defaultUnlockMinutes}`;
+  return t("toolUnlockRequired", { tool: toolName, minutes: config.defaultUnlockMinutes });
 }
 
 class GuardedStdioTransport {
@@ -629,7 +626,7 @@ class GuardedStdioTransport {
 async function buildServer(config) {
   const accessToken = readTokenFromProvider(config.secretProvider);
   if (!accessToken) {
-    exitWithError("读取到的 token 为空");
+    exitWithError(t("tokenEmpty"));
   }
 
   const platform = createSupabaseApiPlatform({
@@ -682,13 +679,13 @@ function printClientSnippet(client) {
     return;
   }
 
-  exitWithError(`不支持的 client: ${client}`);
+  exitWithError(t("clientUnsupported", { client }));
 }
 
 function handleControlCommand(args, config) {
   if (args.command === "print-snippet") {
     if (!args.client) {
-      exitWithError("print-snippet 需要 --client 参数");
+      exitWithError(t("printSnippetClientRequired"));
     }
     printClientSnippet(args.client);
     return true;
@@ -703,6 +700,7 @@ function handleControlCommand(args, config) {
       default_unlock_minutes: config.defaultUnlockMinutes,
       always_blocked_tools: [...config.alwaysBlockedTools],
       secret_provider_type: config.secretProvider.type,
+      locale: currentLocale(),
     });
     return true;
   }
@@ -710,7 +708,7 @@ function handleControlCommand(args, config) {
   if (args.command === "unlock") {
     const minutes = args.minutes ?? config.defaultUnlockMinutes;
     if (!Number.isFinite(minutes) || minutes <= 0) {
-      exitWithError("--minutes 必须是正数");
+      exitWithError(t("minutesPositiveRequired"));
     }
     const unlockedUntil = writeUnlockState(config, minutes);
     printJson({
@@ -771,6 +769,7 @@ async function main() {
       default_unlock_minutes: config.defaultUnlockMinutes,
       always_blocked_tools: [...config.alwaysBlockedTools],
       secret_provider_type: config.secretProvider.type,
+      locale: currentLocale(),
     });
     await server.close();
     return;

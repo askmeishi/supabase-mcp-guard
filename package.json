@@ -10,7 +10,7 @@
     "node": ">=22.0.0"
   },
   "scripts": {
-    "check": "node --check src/cli.mjs",
+    "check": "node --check src/cli.mjs && node --check src/i18n.mjs",
     "self_test": "node src/cli.mjs --self-test"
   },
   "keywords": [
