@@ -1,0 +1,19 @@
+{
+  "keychainService": "supabase-mcp-guard",
+  "keychainAccount": "primary",
+  "projectRef": null,
+  "readOnly": false,
+  "features": null,
+  "apiUrl": null,
+  "logFile": "~/.local/state/supabase-mcp-guard/audit.log",
+  "stateFile": "~/.local/state/supabase-mcp-guard/write_lock.json",
+  "defaultUnlockMinutes": 10,
+  "allowedProjectIds": [
+    "your-project-ref"
+  ],
+  "alwaysBlockedTools": [
+    "create_project",
+    "pause_project",
+    "restore_project"
+  ]
+}

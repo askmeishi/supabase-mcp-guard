@@ -1,0 +1,29 @@
+{
+  "name": "supabase-mcp-guard",
+  "version": "0.1.0",
+  "description": "Local policy wrapper for Supabase MCP with macOS Keychain-backed tokens, project allowlists, write locks, and audit logs.",
+  "type": "module",
+  "bin": {
+    "supabase-mcp-guard": "./src/cli.mjs"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "check": "node --check src/cli.mjs",
+    "self_test": "node src/cli.mjs --self-test"
+  },
+  "keywords": [
+    "mcp",
+    "supabase",
+    "security",
+    "keychain",
+    "codex",
+    "ai"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "1.25.2",
+    "@supabase/mcp-server-supabase": "0.7.0"
+  }
+}
