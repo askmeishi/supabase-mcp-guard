@@ -82,6 +82,18 @@ cd supabase-mcp-guard
 npm install
 ```
 
+### Install from npm
+
+```bash
+npm install -g supabase-mcp-guard
+```
+
+If you install from npm globally, you can run the wrapper directly without cloning the repo:
+
+```bash
+supabase-mcp-guard --self-test
+```
+
 ### macOS installer
 
 ```bash
@@ -113,6 +125,8 @@ What it does:
 - writes config to `%APPDATA%\supabase-mcp-guard\config.json`
 - installs the wrapper under `%LOCALAPPDATA%\Programs\supabase-mcp-guard`
 - adds the local wrapper directory to the user `PATH`
+
+If you installed from npm instead of cloning this repo, you can still use the wrapper directly and create your config manually from [config.example.json](./config.example.json).
 
 ## Secret providers
 
@@ -364,6 +378,28 @@ It does not protect against:
 - a fully compromised machine
 - malicious code already running with your user privileges
 - overbroad permissions granted directly inside Supabase
+
+## Publishing
+
+This repository is set up for both local package validation and tagged releases.
+
+Local verification before release:
+
+```bash
+npm run check
+npm pack --dry-run
+```
+
+Release flow:
+
+1. bump `package.json` version
+2. commit and push to `main`
+3. create and push a version tag such as `v0.1.1`
+4. GitHub Actions `Release` publishes to npm and creates a GitHub Release
+
+Required secret:
+
+- `NPM_TOKEN` in the GitHub repository secrets
 
 ## Roadmap
 

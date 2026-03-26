@@ -82,6 +82,18 @@ cd supabase-mcp-guard
 npm install
 ```
 
+### 通过 npm 全局安装
+
+```bash
+npm install -g supabase-mcp-guard
+```
+
+如果你走 npm 全局安装，就不需要先克隆仓库，也可以直接运行：
+
+```bash
+supabase-mcp-guard --self-test
+```
+
 ### macOS
 
 ```bash
@@ -110,6 +122,8 @@ Set-ExecutionPolicy -Scope Process Bypass
 - 把 token 写入 `SecretStore`
 - 写配置到 `%APPDATA%\supabase-mcp-guard\config.json`
 - 安装 wrapper 到 `%LOCALAPPDATA%\Programs\supabase-mcp-guard`
+
+如果不是通过仓库脚本安装，而是通过 npm 全局安装，也可以直接使用二进制，并基于 [config.example.json](./config.example.json) 手工生成配置。
 
 ## Secret Provider 示例
 
@@ -303,6 +317,28 @@ SUPABASE_MCP_GUARD_LANG=en supabase-mcp-guard status
 
 - [SECURITY.md](./SECURITY.md)
 - [SECURITY.zh-CN.md](./SECURITY.zh-CN.md)
+
+## 发布
+
+仓库已经补齐本地校验和 tag 发版链路。
+
+本地发版前校验：
+
+```bash
+npm run check
+npm pack --dry-run
+```
+
+推荐发版流程：
+
+1. 修改 `package.json` 版本号
+2. 提交并推送到 `main`
+3. 创建并推送版本 tag，例如 `v0.1.1`
+4. GitHub Actions `Release` 自动发布到 npm，并创建 GitHub Release
+
+仓库需要预先配置：
+
+- GitHub Actions Secret：`NPM_TOKEN`
 
 ## License
 

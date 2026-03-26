@@ -3,6 +3,14 @@
   "version": "0.1.0",
   "description": "Local policy wrapper for Supabase MCP with macOS Keychain-backed tokens, project allowlists, write locks, and audit logs.",
   "type": "module",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/askmeishi/supabase-mcp-guard.git"
+  },
+  "homepage": "https://github.com/askmeishi/supabase-mcp-guard#readme",
+  "bugs": {
+    "url": "https://github.com/askmeishi/supabase-mcp-guard/issues"
+  },
   "bin": {
     "supabase-mcp-guard": "./src/cli.mjs"
   },
@@ -11,8 +19,19 @@
   },
   "scripts": {
     "check": "node --check src/cli.mjs && node --check src/i18n.mjs",
-    "self_test": "node src/cli.mjs --self-test"
+    "self_test": "node src/cli.mjs --self-test",
+    "prepack": "npm run check"
   },
+  "files": [
+    "src",
+    "scripts",
+    "config.example.json",
+    "README.md",
+    "README.zh-CN.md",
+    "SECURITY.md",
+    "SECURITY.zh-CN.md",
+    "LICENSE"
+  ],
   "keywords": [
     "mcp",
     "supabase",
@@ -22,6 +41,9 @@
     "ai"
   ],
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "@modelcontextprotocol/sdk": "1.25.2",
     "@supabase/mcp-server-supabase": "0.7.0"
